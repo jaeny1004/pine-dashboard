@@ -114,18 +114,6 @@ export default async function handler(
     const isWebhook = Boolean(body.record);
 
     if (isWebhook) {
-      const receivedSecret =
-        req.headers["x-auto-analysis-secret"];
-
-      if (
-        !AUTO_ANALYSIS_SECRET ||
-        receivedSecret !== AUTO_ANALYSIS_SECRET
-      ) {
-        return res.status(401).json({
-          error: "자동 분석 요청 인증에 실패했습니다.",
-        });
-      }
-
       if (
         body.type !== "INSERT" ||
         body.table !== "pine_records"
