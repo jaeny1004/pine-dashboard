@@ -57,6 +57,8 @@ type PineRecordRow = {
   longitude?: number;
   image_url?: string;
   ai_probability?: number;
+  ai_label?: string;
+  ai_status?: string;
 };
 
 function mapPineRecordToCrowdReport(row: PineRecordRow): CrowdReport {

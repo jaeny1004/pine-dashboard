@@ -204,22 +204,39 @@ function parseRoboflowResult(result: RoboflowRawResult): ParsedAiResult {
   };
 }
 
-async function requestRoboflowAnalysis(imageUrl: string): Promise<ParsedAiResult> {
+
+async function requestRoboflowAnalysis(
+  imageUrl: string,
+  recordId: string
+): Promise<ParsedAiResult> {
   if (!imageUrl) {
     throw new Error("분석할 image_url이 없습니다.");
   }
 
-  const { data } = await axios.post<RoboflowRawResult>(
+  const { data } = await axios.post(
     "/api/roboflow",
     {
       imageUrl,
+      recordId,
     },
     {
       timeout: 45000,
     }
   );
 
-  return parseRoboflowResult(data);
+  return {
+    ok: data.ok ?? true,
+    label: data.label ?? "unknown",
+    score: Number(data.score ?? 0),
+    level: data.level ?? "warning",
+    message:
+      data.message ??
+      `AI 판독 완료 - ${data.label ?? "unknown"} / ${Number(
+        data.score ?? 0
+      ).toFixed(1)}%`,
+    raw: data.raw ?? data,
+    predictions: data.raw?.predictions ?? [],
+  };
 }
 
 function getRiskTheme(level: ParsedAiResult["level"] | undefined) {
@@ -353,32 +370,12 @@ export default function FieldSection({
     setIsRawOpen(false);
 
     try {
-      const result = await requestRoboflowAnalysis(selectedImageUrl);
+      const result = await requestRoboflowAnalysis(
+        selectedImageUrl,
+        String(selectedReport.id)
+      );
 
-      // 1. 화면에 Roboflow 분석 결과 표시
       setAiResult(result);
-
-      // 2. Supabase pine_records 테이블에 AI 판독 확률 저장
-      const { error: updateError } = await supabase
-        .from("pine_records")
-        .update({
-          ai_probability: Math.round(result.score),
-          status: result.level === "danger" ? "review" : "pending",
-        })
-        .eq("id", selectedReport.id);
-
-      if (updateError) {
-        console.error("AI 결과 Supabase 업데이트 실패:", updateError);
-        setAiError(
-          `AI 판독은 성공했지만 Supabase 저장에 실패했습니다: ${updateError.message}`
-        );
-        return;
-      }
-
-      console.log("AI 결과 Supabase 업데이트 완료:", {
-        id: selectedReport.id,
-        ai_probability: Math.round(result.score),
-      });
     } catch (error) {
       console.error(error);
 
@@ -411,8 +408,8 @@ export default function FieldSection({
         <button
           onClick={() => setActiveTab("tracking")}
           className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === "tracking"
-              ? "bg-white text-emerald-950 shadow-sm"
-              : "hover:text-slate-900"
+            ? "bg-white text-emerald-950 shadow-sm"
+            : "hover:text-slate-900"
             }`}
         >
           🚶 요원 GPS 및 출동배정
@@ -420,8 +417,8 @@ export default function FieldSection({
         <button
           onClick={() => setActiveTab("crowd")}
           className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === "crowd"
-              ? "bg-white text-emerald-950 shadow-sm"
-              : "hover:text-slate-900"
+            ? "bg-white text-emerald-950 shadow-sm"
+            : "hover:text-slate-900"
             }`}
         >
           👥 크라우드 시민 제보
@@ -429,8 +426,8 @@ export default function FieldSection({
         <button
           onClick={() => setActiveTab("mobile")}
           className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === "mobile"
-              ? "bg-white text-emerald-950 shadow-sm"
-              : "hover:text-slate-900"
+            ? "bg-white text-emerald-950 shadow-sm"
+            : "hover:text-slate-900"
             }`}
         >
           📱 요원 스마트 활동 보고서
@@ -619,8 +616,8 @@ export default function FieldSection({
                     key={rep.id}
                     onClick={() => setSelectedReportId(rep.id)}
                     className={`p-4 rounded-2xl border cursor-pointer transition-all ${selectedReportId === rep.id
-                        ? "bg-emerald-50/60 border-emerald-300 shadow-sm"
-                        : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
+                      ? "bg-emerald-50/60 border-emerald-300 shadow-sm"
+                      : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
                       }`}
                   >
                     <div className="flex justify-between items-start gap-2">
@@ -639,10 +636,10 @@ export default function FieldSection({
                       <div className="flex flex-col items-end gap-1.5 shrink-0">
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] font-black ${rep.status === "접수"
-                              ? "bg-sky-100 text-sky-700"
-                              : rep.status === "검토"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-emerald-100 text-emerald-700"
+                            ? "bg-sky-100 text-sky-700"
+                            : rep.status === "검토"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-emerald-100 text-emerald-700"
                             }`}
                         >
                           {rep.status}
@@ -724,8 +721,8 @@ export default function FieldSection({
 
                         <span
                           className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-black ${ROBOFLOW_API_KEY
-                              ? "bg-emerald-400 text-emerald-950"
-                              : "bg-rose-400 text-white"
+                            ? "bg-emerald-400 text-emerald-950"
+                            : "bg-rose-400 text-white"
                             }`}
                         >
                           {ROBOFLOW_API_KEY ? "API KEY OK" : "API KEY 없음"}
@@ -835,8 +832,8 @@ export default function FieldSection({
                         onClick={handleRunAiAnalysis}
                         disabled={isAiLoading || !selectedImageUrl || !ROBOFLOW_API_KEY}
                         className={`w-full rounded-2xl py-3 px-4 font-black text-xs flex items-center justify-center gap-2 transition-all ${isAiLoading || !selectedImageUrl || !ROBOFLOW_API_KEY
-                            ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                            : "bg-emerald-800 hover:bg-emerald-900 text-white shadow-lg"
+                          ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                          : "bg-emerald-800 hover:bg-emerald-900 text-white shadow-lg"
                           }`}
                       >
                         {isAiLoading ? (
