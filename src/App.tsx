@@ -3,20 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  TreePine, 
-  Map, 
-  ShieldCheck, 
-  FileText, 
-  Cpu, 
-  MessageSquare, 
-  HelpCircle, 
-  X, 
-  Calendar, 
-  Flame, 
-  Activity 
+import {
+  TreePine,
+  Map,
+  ShieldCheck,
+  FileText,
+  Cpu,
+  MessageSquare,
+  HelpCircle,
+  X,
+  Calendar,
+  Flame,
+  Activity
 } from "lucide-react";
 
 // Sub components
@@ -28,28 +29,138 @@ import AdminSection from "./components/AdminSection";
 import SystemSection from "./components/SystemSection";
 import Chatbot from "./components/Chatbot";
 
-import { 
-  initialGrids, 
-  initialTrees, 
-  initialWorkers, 
-  initialCrowdReports, 
-  initialControlTasks, 
-  GridCell, 
-  TreeRecord, 
-  WorkerStatus, 
-  CrowdReport, 
-  ControlTask 
+import {
+  initialGrids,
+  initialTrees,
+  initialWorkers,
+  initialCrowdReports,
+  initialControlTasks,
+  GridCell,
+  TreeRecord,
+  WorkerStatus,
+  CrowdReport,
+  ControlTask
 } from "./types";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+type PineRecordRow = {
+  id: string;
+  created_at?: string;
+  phone_number?: string;
+  reporter?: string;
+  status?: string;
+  latitude?: number;
+  longitude?: number;
+  image_url?: string;
+  ai_probability?: number;
+};
+
+function mapPineRecordToCrowdReport(row: PineRecordRow): CrowdReport {
+  return {
+    id: String(row.id),
+    reporter: row.reporter || row.phone_number || "시민 제보자",
+    date: row.created_at
+      ? new Date(row.created_at).toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0],
+    title: "Supabase 시민 모바일 신고 건",
+    region:
+      row.latitude && row.longitude
+        ? `위도 ${Number(row.latitude).toFixed(5)}, 경도 ${Number(row.longitude).toFixed(5)}`
+        : "위치 정보 미확인",
+    description: "Supabase pine_records 테이블에서 수신된 시민 제보입니다.",
+    status:
+      row.status === "pending"
+        ? "접수"
+        : row.status === "confirmed"
+          ? "확진전환"
+          : row.status === "rejected"
+            ? "반려"
+            : "검토",
+    aiProbability: Number(row.ai_probability ?? 0),
+
+    // 중요: Supabase의 image_url을 React 타입의 photoUrl로 바꿔 넣는 부분
+    photoUrl: row.image_url || "",
+
+    latitude: row.latitude,
+    longitude: row.longitude,
+    phone_number: row.phone_number,
+    created_at: row.created_at,
+  };
+}
+
+
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<"dashboard" | "monitoring" | "field" | "control" | "admin" | "system">("dashboard");
-  
+
   // App-wide Central State
   const [grids, setGrids] = useState<GridCell[]>(initialGrids);
   const [trees, setTrees] = useState<TreeRecord[]>(initialTrees);
   const [workers, setWorkers] = useState<WorkerStatus[]>(initialWorkers);
   const [reports, setReports] = useState<CrowdReport[]>(initialCrowdReports);
   const [tasks, setTasks] = useState<ControlTask[]>(initialControlTasks);
+  useEffect(() => {
+    const fetchPineRecordsAsReports = async () => {
+      const { data, error } = await supabase
+        .from("pine_records")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("pine_records 조회 실패:", error);
+        return;
+      }
+
+      const mappedReports = (data || []).map(mapPineRecordToCrowdReport);
+      setReports(mappedReports);
+    };
+
+    fetchPineRecordsAsReports();
+
+    const channel = supabase
+      .channel("pine_records_to_reports")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "pine_records",
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            const deletedId = String(payload.old.id);
+
+            setReports((prev) => prev.filter((report) => report.id !== deletedId));
+            return;
+          }
+
+          const changedReport = mapPineRecordToCrowdReport(
+            payload.new as PineRecordRow
+          );
+
+          setReports((prev) => {
+            const exists = prev.some((report) => report.id === changedReport.id);
+
+            if (!exists) {
+              return [changedReport, ...prev];
+            }
+
+            return prev.map((report) =>
+              report.id === changedReport.id ? changedReport : report
+            );
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // AI Chatbot overlay status
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -60,7 +171,7 @@ export default function App() {
   };
 
   const handleUpdateTreeStatus = (id: string, newStatus: TreeRecord["status"]) => {
-    setTrees((prev) => 
+    setTrees((prev) =>
       prev.map((t) => {
         if (t.id === id) {
           const updatedTimeline = [
@@ -116,11 +227,11 @@ export default function App() {
   };
 
   const handleUpdateTaskProgress = (id: string, progress: number) => {
-    setTasks((prev) => 
+    setTasks((prev) =>
       prev.map((t) => {
         const isComplete = progress >= 100;
-        return t.id === id 
-          ? { ...t, progress, status: isComplete ? "완료" : "진행" as any } 
+        return t.id === id
+          ? { ...t, progress, status: isComplete ? "완료" : "진행" as any }
           : t;
       })
     );
@@ -180,11 +291,10 @@ export default function App() {
                 <button
                   key={m.id}
                   onClick={() => setActiveModule(m.id)}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex flex-col items-start ${
-                    activeModule === m.id 
-                      ? "bg-white text-emerald-950 shadow-sm" 
-                      : "text-emerald-100 hover:bg-emerald-850 hover:text-white"
-                  }`}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex flex-col items-start ${activeModule === m.id
+                    ? "bg-white text-emerald-950 shadow-sm"
+                    : "text-emerald-100 hover:bg-emerald-850 hover:text-white"
+                    }`}
                 >
                   <span>{m.label}</span>
                   <span className={`text-[9px] font-medium mt-0.5 ${activeModule === m.id ? "text-slate-500" : "text-emerald-300/80"}`}>
@@ -209,38 +319,38 @@ export default function App() {
             className="space-y-6"
           >
             {activeModule === "dashboard" && (
-              <Dashboard 
-                grids={grids} 
-                trees={trees} 
-                workers={workers} 
-                reports={reports} 
+              <Dashboard
+                grids={grids}
+                trees={trees}
+                workers={workers}
+                reports={reports}
               />
             )}
-            
+
             {activeModule === "monitoring" && (
-              <MonitoringSection 
-                trees={trees} 
-                onAddTree={handleAddTree} 
-                onUpdateTreeStatus={handleUpdateTreeStatus} 
+              <MonitoringSection
+                trees={trees}
+                onAddTree={handleAddTree}
+                onUpdateTreeStatus={handleUpdateTreeStatus}
               />
             )}
 
             {activeModule === "field" && (
-              <FieldSection 
-                workers={workers} 
-                reports={reports} 
-                onUpdateWorkerStatus={handleUpdateWorkerStatus} 
+              <FieldSection
+                workers={workers}
+                reports={reports}
+                onUpdateWorkerStatus={handleUpdateWorkerStatus}
                 onUpdateReportStatus={handleUpdateReportStatus}
                 onConfirmInfection={handleConfirmInfection}
               />
             )}
 
             {activeModule === "control" && (
-              <ControlSection 
-                tasks={tasks} 
-                grids={grids} 
-                onAddTask={handleAddTask} 
-                onUpdateTaskProgress={handleUpdateTaskProgress} 
+              <ControlSection
+                tasks={tasks}
+                grids={grids}
+                onAddTask={handleAddTask}
+                onUpdateTaskProgress={handleUpdateTaskProgress}
               />
             )}
 
@@ -259,14 +369,14 @@ export default function App() {
       <div className="fixed bottom-6 right-6 z-50">
         <AnimatePresence>
           {isChatOpen && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 30 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 30 }}
               className="absolute bottom-16 right-0 w-[360px] md:w-[420px] shadow-2xl rounded-3xl overflow-hidden border border-slate-200"
             >
               <div className="relative">
-                <button 
+                <button
                   onClick={() => setIsChatOpen(false)}
                   className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 z-50"
                 >

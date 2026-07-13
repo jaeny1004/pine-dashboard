@@ -67,6 +67,11 @@ export interface CrowdReport {
   aiProbability: number;
   description: string;
   photoUrl?: string;
+
+  latitude?: number;
+  longitude?: number;
+  phone_number?: string;
+  created_at?: string;
 }
 
 export interface ControlTask {
