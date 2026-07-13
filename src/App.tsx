@@ -133,6 +133,7 @@ export default function App() {
           table: "pine_records",
         },
         (payload) => {
+          console.log("pine_records realtime payload:", payload);
           if (payload.eventType === "DELETE") {
             const deletedId = String(payload.old.id);
 
@@ -157,7 +158,9 @@ export default function App() {
           });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("pine_records realtime status:", status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
